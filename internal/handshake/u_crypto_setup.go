@@ -53,6 +53,8 @@ type uCryptoSetup struct {
 	aead          *updatableAEAD
 	has1RTTSealer bool
 	has1RTTOpener bool
+
+	helloHookErr error // [VPP] QUICSpec.ClientHelloHook failed: StartHandshake returns it
 }
 
 var _ CryptoSetup = &uCryptoSetup{}
@@ -69,6 +71,7 @@ func NewUCryptoSetupClient(
 	logger utils.Logger,
 	version protocol.Version,
 	chs *tls.ClientHelloSpec,
+	helloHook func(*tls.UQUICConn) error, // [VPP] QUICSpec.ClientHelloHook (may be nil)
 ) CryptoSetup {
 	cs := newUCryptoSetup(
 		connID,
@@ -92,6 +95,11 @@ func NewUCryptoSetupClient(
 	}, tls.HelloCustom)
 	if err := cs.conn.ApplyPreset(chs); err != nil {
 		panic(err)
+	}
+	// [VPP] the caller's last word on the ClientHello; a failure surfaces from
+	// StartHandshake, so the dial returns it instead of sending anything
+	if helloHook != nil {
+		cs.helloHookErr = helloHook(cs.conn)
 	}
 
 	// cs.conn.SetTransportParameters(cs.ourParams.Marshal(protocol.PerspectiveClient)) // [UQUIC] doesn't require this
@@ -138,6 +146,9 @@ func (h *uCryptoSetup) SetLargest1RTTAcked(pn protocol.PacketNumber) error {
 }
 
 func (h *uCryptoSetup) StartHandshake(ctx context.Context) error {
+	if h.helloHookErr != nil { // [VPP]
+		return wrapError(h.helloHookErr)
+	}
 	err := h.conn.Start(context.WithValue(ctx, QUICVersionContextKey, h.version))
 	if err != nil {
 		return wrapError(err)

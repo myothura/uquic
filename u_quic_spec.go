@@ -69,6 +69,13 @@ type QUICSpec struct {
 	// produces a ClientHello a conformant server will reject. That is allowed on
 	// purpose — mimicry sometimes needs it — but it is the caller's responsibility.
 	SuppressTransportParameters []uint64
+
+	// [VPP] ClientHelloHook, when set, is called once per connection with the
+	// connection's uTLS QUIC state after ClientHelloSpec was applied and before
+	// the handshake starts, i.e. before any byte of the ClientHello is handed to
+	// the QUIC layer. It lets the caller finish the ClientHello (for example
+	// derive its random from the key shares it carries). An error fails the dial.
+	ClientHelloHook func(*tls.UQUICConn) error
 }
 
 // TransportParameterIDs returns the QUIC transport parameter IDs this spec will put on

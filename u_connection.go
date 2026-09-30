@@ -182,6 +182,7 @@ var newUClientConnection = func(
 		logger,
 		s.version,
 		uSpec.ClientHelloSpec,
+		uSpec.ClientHelloHook, // [VPP]
 	)
 	s.cryptoStreamHandler = cs
 	s.cryptoStreamManager = newCryptoStreamManager(s.initialStream, s.handshakeStream, oneRTTStream)
