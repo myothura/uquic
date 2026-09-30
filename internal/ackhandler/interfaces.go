@@ -1,6 +1,7 @@
 package ackhandler
 
 import (
+	"github.com/refraction-networking/uquic/congestion"
 	"github.com/refraction-networking/uquic/internal/monotime"
 	"github.com/refraction-networking/uquic/internal/protocol"
 	"github.com/refraction-networking/uquic/internal/wire"
@@ -24,6 +25,7 @@ type SentPacketHandler interface {
 	// It is used for pacing packets.
 	TimeUntilSend() monotime.Time
 	SetMaxDatagramSize(count protocol.ByteCount)
+	SetCongestionControl(congestion.CongestionControl) // [VPP]
 
 	// only to be called once the handshake is complete
 	QueueProbePacket(protocol.EncryptionLevel) bool /* was a packet queued */

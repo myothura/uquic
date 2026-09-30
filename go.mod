@@ -3,6 +3,7 @@ module github.com/refraction-networking/uquic
 go 1.24
 
 require (
+	github.com/apernet/quic-go v0.61.1-0.20260806010916-184d081eef3e // [VPP] pluggable congestion control + one monotime epoch
 	github.com/francoispqt/gojay v1.2.13
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.37.0

@@ -362,7 +362,7 @@ func (p *uPacketPacker) flightBudgets(cryptoLen int, sealer sealer, maxSize prot
 		if plan.PacketSize > 0 {
 			size = protocol.ByteCount(plan.PacketSize)
 		}
-		budgets[i] = InitialDatagramBudget{Plan: plan, MaxFrameBytes: p.initialFrameBudget(size, sealer, v)}
+		budgets[i] = InitialDatagramBudget{Plan: plan, MaxFrameBytes: p.initialFrameBudgetFor(i, size, sealer, v)}
 	}
 	return budgets
 }
@@ -371,7 +371,21 @@ func (p *uPacketPacker) flightBudgets(cryptoLen int, sealer sealer, maxSize prot
 // packetSize bytes can carry: the size minus the long header — with its Length varint
 // sized the way appendInitialPacketPayload sizes it — and the AEAD tag. [UQUIC]
 func (p *uPacketPacker) initialFrameBudget(packetSize protocol.ByteCount, sealer sealer, v protocol.Version) int {
+	return p.initialFrameBudgetFor(0, packetSize, sealer, v)
+}
+
+// initialFrameBudgetFor is initialFrameBudget for the idx-th Initial datagram of the
+// flight: the header is sized with that packet's packet number length
+// (InitPacketNumberLengths), not the first packet's. [VPP] Before this, a spec with
+// {1, 2} planned datagram 1 with a 1-byte PN and sent it with a 2-byte one, so a pinned
+// PacketSize came out one byte long.
+func (p *uPacketPacker) initialFrameBudgetFor(idx int, packetSize protocol.ByteCount, sealer sealer, v protocol.Version) int {
 	hdr := p.getLongHeader(protocol.EncryptionInitial, v)
+	if pls := p.uSpec.InitialPacketSpec.InitPacketNumberLengths; len(pls) > 0 {
+		if l := pls[min(idx, len(pls)-1)]; l > 0 {
+			hdr.PacketNumberLen = l
+		}
+	}
 	hdr.Length = packetSize
 	budget := packetSize - hdr.GetLength(v) - protocol.ByteCount(sealer.Overhead())
 	return int(max(budget, 0))
@@ -556,26 +570,11 @@ func (p *uPacketPacker) PackPTOProbePacket(
 	v protocol.Version,
 ) (*coalescedPacket, error) {
 	if encLevel == protocol.Encryption1RTT {
-		s, err := p.cryptoSetup.Get1RTTSealer()
-		if err != nil {
-			return nil, err
-		}
-		kp := s.KeyPhase()
-		connID := p.getDestConnID()
-		pn, pnLen := p.pnManager.PeekPacketNumber(protocol.Encryption1RTT)
-		hdrLen := wire.ShortHeaderLen(connID, pnLen)
-		pl := p.maybeGetAppDataPacket(maxPacketSize-protocol.ByteCount(s.Overhead())-hdrLen, false, true, now, v)
-		if pl.length == 0 {
-			return nil, nil
-		}
-		buffer := getPacketBuffer()
-		packet := &coalescedPacket{buffer: buffer}
-		shp, err := p.appendShortHeaderPacket(buffer, connID, pn, pnLen, kp, pl, 0, maxPacketSize, s, false, v)
-		if err != nil {
-			return nil, err
-		}
-		packet.shortHdrPacket = &shp
-		return packet, nil
+		// [VPP] the base packer: it honours addPingIfEmpty. The copy that was
+		// here returned nil for an empty probe, and the connection then died
+		// with "connection BUG: couldn't pack 1-RTT probe packet" on the
+		// first PTO with nothing to retransmit (any lossy path).
+		return p.packetPacker.packPTOProbePacket1RTT(maxPacketSize, addPingIfEmpty, now, v)
 	}
 
 	var sealer handshake.LongHeaderSealer

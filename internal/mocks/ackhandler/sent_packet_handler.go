@@ -10,6 +10,7 @@
 package mockackhandler
 
 import (
+	"github.com/refraction-networking/uquic/congestion"
 	reflect "reflect"
 
 	ackhandler "github.com/refraction-networking/uquic/internal/ackhandler"
@@ -563,6 +564,12 @@ func (c *MockSentPacketHandlerSentPacketCall) Do(f func(monotime.Time, protocol.
 func (c *MockSentPacketHandlerSentPacketCall) DoAndReturn(f func(monotime.Time, protocol.PacketNumber, protocol.PacketNumber, []ackhandler.StreamFrame, []ackhandler.Frame, protocol.EncryptionLevel, protocol.ECN, protocol.ByteCount, bool, bool)) *MockSentPacketHandlerSentPacketCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
+}
+
+// SetCongestionControl mocks base method ([VPP]).
+func (m *MockSentPacketHandler) SetCongestionControl(arg0 congestion.CongestionControl) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetCongestionControl", arg0)
 }
 
 // SetMaxDatagramSize mocks base method.

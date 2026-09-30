@@ -1,6 +1,7 @@
 package congestion
 
 import (
+	"github.com/refraction-networking/uquic/congestion"
 	"github.com/refraction-networking/uquic/internal/monotime"
 	"github.com/refraction-networking/uquic/internal/protocol"
 )
@@ -19,6 +20,13 @@ type SendAlgorithm interface {
 }
 
 // A SendAlgorithmWithDebugInfos is a SendAlgorithm that exposes some debug infos
+// SendAlgorithmEx ([VPP], from apernet/quic-go) receives the acked and lost
+// packets of one event together (BBR needs the batch).
+type SendAlgorithmEx interface {
+	SendAlgorithm
+	OnCongestionEventEx(priorInFlight protocol.ByteCount, eventTime monotime.Time, ackedPackets []congestion.AckedPacketInfo, lostPackets []congestion.LostPacketInfo)
+}
+
 type SendAlgorithmWithDebugInfos interface {
 	SendAlgorithm
 	InSlowStart() bool

@@ -1,10 +1,12 @@
 package ackhandler
 
 import (
+	"sync"
 	"errors"
 	"fmt"
 	"time"
 
+	congestionExt "github.com/refraction-networking/uquic/congestion"
 	"github.com/refraction-networking/uquic/internal/congestion"
 	"github.com/refraction-networking/uquic/internal/monotime"
 	"github.com/refraction-networking/uquic/internal/protocol"
@@ -89,7 +91,12 @@ type sentPacketHandler struct {
 
 	bytesInFlight protocol.ByteCount
 
-	congestion congestion.SendAlgorithmWithDebugInfos
+	// [VPP] pluggable congestion control (apernet/quic-go): the connection may
+	// swap the algorithm after the handshake started (SetCongestionControl)
+	ackedPacketsInfo []congestionExt.AckedPacketInfo
+	lostPacketsInfo  []congestionExt.LostPacketInfo
+	congestion       congestion.SendAlgorithmWithDebugInfos
+	congestionMutex  sync.RWMutex
 	rttStats   *utils.RTTStats
 	connStats  *utils.ConnectionStats
 
@@ -297,7 +304,7 @@ func (h *sentPacketHandler) SentPacket(
 			h.numProbesToSend--
 		}
 	}
-	h.congestion.OnPacketSent(t, h.bytesInFlight, pn, size, isAckEliciting)
+	h.getCongestionControl().OnPacketSent(t, h.bytesInFlight, pn, size, isAckEliciting)
 
 	if encLevel == protocol.Encryption1RTT && h.ecnTracker != nil {
 		h.ecnTracker.SentPacket(pn, ecn)
@@ -341,7 +348,7 @@ func (h *sentPacketHandler) qlogMetricsUpdated() {
 			updated = true
 		}
 	}
-	if cwnd := h.congestion.GetCongestionWindow(); h.lastMetrics.CongestionWindow != int(cwnd) {
+	if cwnd := h.getCongestionControl().GetCongestionWindow(); h.lastMetrics.CongestionWindow != int(cwnd) {
 		metricsUpdatedEvent.CongestionWindow = int(cwnd)
 		h.lastMetrics.CongestionWindow = metricsUpdatedEvent.CongestionWindow
 		updated = true
@@ -396,6 +403,7 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 	}
 
 	priorInFlight := h.bytesInFlight
+	cc := h.getCongestionControl() // [VPP]
 	ackedPackets, hasAckEliciting, err := h.detectAndRemoveAckedPackets(ack, encLevel)
 	if err != nil || len(ackedPackets) == 0 {
 		return false, err
@@ -417,7 +425,7 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 				}
 				h.largestAckedTime = p.SendTime
 			}
-			h.congestion.MaybeExitSlowStart()
+			cc.MaybeExitSlowStart()
 		}
 	}
 
@@ -425,20 +433,25 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 	if encLevel == protocol.Encryption1RTT && h.ecnTracker != nil && largestAcked > pnSpace.largestAcked {
 		congested := h.ecnTracker.HandleNewlyAcked(ackedPackets, int64(ack.ECT0), int64(ack.ECT1), int64(ack.ECNCE))
 		if congested {
-			h.congestion.OnCongestionEvent(largestAcked, 0, priorInFlight)
+			cc.OnCongestionEvent(largestAcked, 0, priorInFlight)
 		}
 	}
 
 	pnSpace.largestAcked = max(pnSpace.largestAcked, largestAcked)
 
 	h.detectLostPackets(rcvTime, encLevel)
+	h.ackedPacketsInfo = h.ackedPacketsInfo[:0]
 	if encLevel == protocol.Encryption1RTT {
 		h.detectLostPathProbes(rcvTime)
 	}
 	var acked1RTTPacket bool
 	for _, p := range ackedPackets {
 		if p.includedInBytesInFlight {
-			h.congestion.OnPacketAcked(p.PacketNumber, p.Length, priorInFlight, rcvTime)
+			cc.OnPacketAcked(p.PacketNumber, p.Length, priorInFlight, rcvTime)
+			h.ackedPacketsInfo = append(h.ackedPacketsInfo, congestionExt.AckedPacketInfo{
+				PacketNumber: congestionExt.PacketNumber(p.PacketNumber),
+				BytesAcked:   congestionExt.ByteCount(p.Length),
+			})
 		}
 		if p.EncryptionLevel == protocol.Encryption1RTT {
 			acked1RTTPacket = true
@@ -447,6 +460,11 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 		if !p.isPathProbePacket {
 			putPacket(p.packet)
 		}
+	}
+
+	if cex, ok := cc.(congestion.SendAlgorithmEx); ok && // [VPP]
+		(len(h.ackedPacketsInfo) != 0 || len(h.lostPacketsInfo) != 0) {
+		cex.OnCongestionEventEx(priorInFlight, rcvTime, h.ackedPacketsInfo, h.lostPacketsInfo)
 	}
 
 	// detect spurious losses for application data packets, if the ACK was not reordered
@@ -464,6 +482,8 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 	ackedPackets = nil    //nolint:ineffassign // This is just to be on the safe side.
 	clear(h.ackedPackets) // make sure the memory is released
 	h.ackedPackets = h.ackedPackets[:0]
+	h.ackedPacketsInfo = h.ackedPacketsInfo[:0] // [VPP]
+	h.lostPacketsInfo = h.lostPacketsInfo[:0]
 
 	// Reset the pto_count unless the client is unsure if the server has validated the client's address.
 	if h.peerCompletedAddressValidation {
@@ -785,6 +805,8 @@ func (h *sentPacketHandler) detectLostPathProbes(now monotime.Time) {
 }
 
 func (h *sentPacketHandler) detectLostPackets(now monotime.Time, encLevel protocol.EncryptionLevel) {
+	h.lostPacketsInfo = h.lostPacketsInfo[:0] // [VPP]
+	cc := h.getCongestionControl()
 	pnSpace := h.getPacketNumberSpace(encLevel)
 	pnSpace.lossTime = 0
 
@@ -854,8 +876,12 @@ func (h *sentPacketHandler) detectLostPackets(now monotime.Time, encLevel protoc
 				h.removeFromBytesInFlight(p)
 				h.queueFramesForRetransmission(p)
 				if !p.IsPathMTUProbePacket {
-					h.congestion.OnCongestionEvent(pn, p.Length, priorInFlight)
+					cc.OnCongestionEvent(pn, p.Length, priorInFlight)
 				}
+				h.lostPacketsInfo = append(h.lostPacketsInfo, congestionExt.LostPacketInfo{ // [VPP]
+					PacketNumber: congestionExt.PacketNumber(pn),
+					BytesLost:    congestionExt.ByteCount(p.Length),
+				})
 				if encLevel == protocol.Encryption1RTT && h.ecnTracker != nil {
 					h.ecnTracker.LostPacket(pn)
 				}
@@ -871,6 +897,7 @@ func (h *sentPacketHandler) OnLossDetectionTimeout(now monotime.Time) error {
 		h.detectLostPathProbes(now)
 	}
 
+	priorInFlight := h.bytesInFlight // [VPP]
 	earliestLossTime, encLevel := h.getLossTimeAndSpace()
 	if !earliestLossTime.IsZero() {
 		if h.logger.Debug() {
@@ -885,6 +912,11 @@ func (h *sentPacketHandler) OnLossDetectionTimeout(now monotime.Time) error {
 		}
 		// Early retransmit or time loss detection
 		h.detectLostPackets(now, encLevel)
+
+		if cex, ok := h.getCongestionControl().(congestion.SendAlgorithmEx); ok && // [VPP]
+			len(h.lostPacketsInfo) != 0 {
+			cex.OnCongestionEventEx(priorInFlight, now, nil, h.lostPacketsInfo)
+		}
 		return nil
 	}
 
@@ -1005,9 +1037,10 @@ func (h *sentPacketHandler) SendMode(now monotime.Time) SendMode {
 		return h.ptoMode
 	}
 	// Only send ACKs if we're congestion limited.
-	if !h.congestion.CanSend(h.bytesInFlight) {
+	cc := h.getCongestionControl() // [VPP]
+	if !cc.CanSend(h.bytesInFlight) {
 		if h.logger.Debug() {
-			h.logger.Debugf("Congestion limited: bytes in flight %d, window %d", h.bytesInFlight, h.congestion.GetCongestionWindow())
+			h.logger.Debugf("Congestion limited: bytes in flight %d, window %d", h.bytesInFlight, cc.GetCongestionWindow())
 		}
 		return SendAck
 	}
@@ -1017,18 +1050,18 @@ func (h *sentPacketHandler) SendMode(now monotime.Time) SendMode {
 		}
 		return SendAck
 	}
-	if !h.congestion.HasPacingBudget(now) {
+	if !cc.HasPacingBudget(now) {
 		return SendPacingLimited
 	}
 	return SendAny
 }
 
 func (h *sentPacketHandler) TimeUntilSend() monotime.Time {
-	return h.congestion.TimeUntilSend(h.bytesInFlight)
+	return h.getCongestionControl().TimeUntilSend(h.bytesInFlight)
 }
 
 func (h *sentPacketHandler) SetMaxDatagramSize(s protocol.ByteCount) {
-	h.congestion.SetMaxDatagramSize(s)
+	h.getCongestionControl().SetMaxDatagramSize(s)
 }
 
 func (h *sentPacketHandler) isAmplificationLimited() bool {
@@ -1140,4 +1173,24 @@ func (h *sentPacketHandler) MigratedPath(now monotime.Time, initialMaxDatagramSi
 		h.qlogger,
 	)
 	h.setLossDetectionTimer(now)
+}
+
+// [VPP] pluggable congestion control (apernet/quic-go)
+
+func (h *sentPacketHandler) getCongestionControl() congestion.SendAlgorithmWithDebugInfos {
+	h.congestionMutex.RLock()
+	cc := h.congestion
+	h.congestionMutex.RUnlock()
+	return cc
+}
+
+func (h *sentPacketHandler) SetCongestionControl(cc congestionExt.CongestionControl) {
+	h.congestionMutex.Lock()
+	cc.SetRTTStatsProvider(h.rttStats)
+	if ccEx, isEx := cc.(congestionExt.CongestionControlEx); isEx {
+		h.congestion = &ccAdapterEx{ccEx}
+	} else {
+		h.congestion = &ccAdapter{cc}
+	}
+	h.congestionMutex.Unlock()
 }

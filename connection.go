@@ -1,6 +1,7 @@
 package quic
 
 import (
+	"github.com/refraction-networking/uquic/congestion"
 	"bytes"
 	"context"
 	// [uQUIC] use utls instead of crypto/tls for API compatibility with utls-based connections
@@ -3110,6 +3111,20 @@ func (c *Conn) AddPath(t *Transport) (*Path, error) {
 // For the client, data sent before completion of the handshake is encrypted with 0-RTT keys.
 // For the server, data sent before completion of the handshake is encrypted with 1-RTT keys,
 // however the client's identity is only verified once the handshake completes.
+// SetCongestionControl ([VPP], apernet/quic-go) replaces the connection's
+// congestion controller (what this side sends) with cc.
+func (c *Conn) SetCongestionControl(cc congestion.CongestionControl) {
+	c.sentPacketHandler.SetCongestionControl(cc)
+}
+
+// InitialPacketSize ([VPP], apernet/quic-go) is the datagram size the
+// connection starts with, before path MTU discovery raises it: seed a
+// controller installed with SetCongestionControl with this, not the package
+// default (a lower first MTU report would look like a decrease).
+func (c *Conn) InitialPacketSize() congestion.ByteCount {
+	return congestion.ByteCount(c.config.InitialPacketSize)
+}
+
 func (c *Conn) HandshakeComplete() <-chan struct{} {
 	return c.handshakeCompleteChan
 }
