@@ -225,7 +225,9 @@ func (h *uCryptoSetup) handleEvent(ev tls.QUICEvent) (err error) {
 			ev.SessionState.Extra,
 			addSessionStateExtraPrefix(h.marshalDataForSessionState(ev.SessionState.EarlyData)),
 		)
-		return h.conn.StoreSession(ev.SessionState)
+		// [VPP] utls >= 1.8 has no UQUICConn.StoreSession; the VPP client never
+		// resumes sessions (a fresh connection is what a first visit looks like)
+		return nil
 	case tls.QUICResumeSession:
 		var allowEarlyData bool
 		switch h.perspective {
