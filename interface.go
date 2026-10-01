@@ -182,6 +182,12 @@ type Config struct {
 	Allow0RTT bool
 	// Enable QUIC datagram support (RFC 9221).
 	EnableDatagrams bool
+	// [VPP] AckInBatch sends an acknowledgement as soon as it is due (every
+	// second packet), also between the packets of a batch that arrived
+	// together. Without it one ACK answers the whole batch (up to 32
+	// packets): on a download the peer sees one ACK for 7 packets where a
+	// browser sends one for 2.
+	AckInBatch bool
 	// Enable QUIC Stream Resets with Partial Delivery.
 	// See https://datatracker.ietf.org/doc/html/draft-ietf-quic-reliable-stream-reset-07.
 	EnableStreamResetPartialDelivery bool

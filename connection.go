@@ -1029,6 +1029,13 @@ func (c *Conn) handlePackets() (wasProcessed bool, _ error) {
 		if processed {
 			wasProcessed = true
 		}
+		// [VPP] AckInBatch: the ACK that became due with this packet goes out
+		// now, not after the rest of the batch
+		if c.config.AckInBatch && c.handshakeConfirmed && c.receivedPacketHandler.AckQueued() && !c.sendQueue.WouldBlock() {
+			if err := c.maybeSendAckOnlyPacket(monotime.Now()); err != nil {
+				return false, err
+			}
+		}
 		c.receivedPacketMx.Lock()
 		hasMorePackets = !c.receivedPackets.Empty()
 		if !hasMorePackets {

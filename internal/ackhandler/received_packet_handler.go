@@ -81,6 +81,9 @@ func (h *ReceivedPacketHandler) GetAlarmTimeout() monotime.Time {
 	return h.appDataPackets.GetAlarmTimeout()
 }
 
+// [VPP] AckQueued: an acknowledgement for 1-RTT packets is due now.
+func (h *ReceivedPacketHandler) AckQueued() bool { return h.appDataPackets.ackQueued }
+
 func (h *ReceivedPacketHandler) GetAckFrame(encLevel protocol.EncryptionLevel, now monotime.Time, onlyIfQueued bool) *wire.AckFrame {
 	//nolint:exhaustive // 0-RTT packets can't contain ACK frames.
 	switch encLevel {
