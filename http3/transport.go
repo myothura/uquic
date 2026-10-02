@@ -87,6 +87,11 @@ type Transport struct {
 	// It is invalid to specify any settings defined by RFC 9114 (HTTP/3) and RFC 9297 (HTTP Datagrams).
 	AdditionalSettings map[uint64]uint64
 
+	// ControlStreamExtra is written on the control stream right behind the
+	// SETTINGS frame, in the same write (one STREAM frame): HTTP/3 frames of
+	// the caller's choice, e.g. the GREASE frame a browser sends there. [VPP]
+	ControlStreamExtra []byte
+
 	// MaxResponseHeaderBytes specifies a limit on how many response bytes are
 	// allowed in the server's response header.
 	// Zero means to use a default limit.
@@ -440,6 +445,7 @@ func (t *Transport) NewClientConn(conn *quic.Conn) *ClientConn {
 		t.MaxResponseHeaderBytes,
 		t.DisableCompression,
 		t.Logger,
+		t.ControlStreamExtra...,
 	)
 	go func() {
 		for {

@@ -79,7 +79,7 @@ func (c *rawConn) OpenUniStream() (*quic.SendStream, error) {
 
 // openControlStream opens the control stream and sends the SETTINGS frame.
 // It returns the control stream (needed by the server for sending GOAWAY later).
-func (c *rawConn) openControlStream(settings *settingsFrame) (*quic.SendStream, error) {
+func (c *rawConn) openControlStream(settings *settingsFrame, extra ...byte) (*quic.SendStream, error) {
 	c.qloggerWG.Add(1)
 	defer c.qloggerWG.Done()
 
@@ -107,6 +107,7 @@ func (c *rawConn) openControlStream(settings *settingsFrame) (*quic.SendStream, 
 			Frame:    qlog.Frame{Frame: sf},
 		})
 	}
+	b = append(b, extra...) // [VPP] Transport.ControlStreamExtra: one write, one STREAM frame
 	if _, err := str.Write(b); err != nil {
 		return nil, err
 	}

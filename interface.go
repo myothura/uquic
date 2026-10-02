@@ -49,6 +49,16 @@ func NewClientToken(data []byte) *ClientToken {
 	return &ClientToken{data: slices.Clone(data)}
 }
 
+// Len returns the size of the token in bytes: what it adds to the header of
+// every Initial packet (a caller that pins the Initial datagram size needs it
+// to know how much room the ClientHello has). [VPP]
+func (t *ClientToken) Len() int {
+	if t == nil {
+		return 0
+	}
+	return len(t.data)
+}
+
 type TokenStore interface {
 	// Pop searches for a ClientToken associated with the given key.
 	// Since tokens are not supposed to be reused, it must remove the token from the cache.

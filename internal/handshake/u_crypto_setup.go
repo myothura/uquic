@@ -88,10 +88,21 @@ func NewUCryptoSetupClient(
 	cs.tlsConf = tlsConf
 	cs.allow0RTT = enable0RTT
 
+	// [VPP] session resumption without session events. uTLS has no
+	// UQUICConn.StoreSession, and a QUICResumeSession event blocks the
+	// ClientHello build until the QUIC layer drains it, which a
+	// QUICSpec.ClientHelloHook (it builds the ClientHello before the handshake
+	// starts) cannot do. The ClientSessionCache is wrapped instead, as quic-go
+	// did before session events existed: Put adds the server's transport
+	// parameters to the session, Get hands them back for 0-RTT.
+	if tlsConf.ClientSessionCache != nil {
+		tlsConf.ClientSessionCache = &uSessionCache{wrapped: tlsConf.ClientSessionCache, h: cs}
+	}
+
 	// [UQUIC]
 	cs.conn = tls.UQUICClient(&tls.QUICConfig{
 		TLSConfig:           tlsConf,
-		EnableSessionEvents: true,
+		EnableSessionEvents: false,
 	}, tls.HelloCustom)
 	if err := cs.conn.ApplyPreset(chs); err != nil {
 		panic(err)
@@ -236,8 +247,7 @@ func (h *uCryptoSetup) handleEvent(ev tls.QUICEvent) (err error) {
 			ev.SessionState.Extra,
 			addSessionStateExtraPrefix(h.marshalDataForSessionState(ev.SessionState.EarlyData)),
 		)
-		// [VPP] utls >= 1.8 has no UQUICConn.StoreSession; the VPP client never
-		// resumes sessions (a fresh connection is what a first visit looks like)
+		// [VPP] not reached: session events are off (uSessionCache stores)
 		return nil
 	case tls.QUICResumeSession:
 		var allowEarlyData bool
@@ -584,4 +594,52 @@ func (h *uCryptoSetup) ConnectionState() ConnectionState {
 		ConnectionState: h.conn.ConnectionState(),
 		Used0RTT:        h.used0RTT.Load(),
 	}
+}
+
+// uSessionCache [VPP] is the ClientSessionCache the TLS stack of a client
+// connection sees: the caller's cache, with the QUIC data of a session (the
+// server's transport parameters, for 0-RTT) added on the way in and read on
+// the way out.
+type uSessionCache struct {
+	wrapped tls.ClientSessionCache
+	h       *uCryptoSetup
+}
+
+func (c *uSessionCache) Put(key string, cs *tls.ClientSessionState) {
+	if cs == nil {
+		c.wrapped.Put(key, nil)
+		return
+	}
+	ticket, state, err := cs.ResumptionState()
+	if err != nil || state == nil || c.h.peerParams == nil {
+		c.wrapped.Put(key, cs)
+		return
+	}
+	state.Extra = append(state.Extra, addSessionStateExtraPrefix(c.h.marshalDataForSessionState(state.EarlyData)))
+	ncs, err := tls.NewResumptionState(ticket, state)
+	if err != nil {
+		c.wrapped.Put(key, cs)
+		return
+	}
+	c.wrapped.Put(key, ncs)
+}
+
+func (c *uSessionCache) Get(key string) (*tls.ClientSessionState, bool) {
+	cs, ok := c.wrapped.Get(key)
+	if !ok || cs == nil {
+		return cs, ok
+	}
+	ticket, state, err := cs.ResumptionState()
+	if err != nil || state == nil {
+		return nil, false
+	}
+	allow := c.h.handleDataFromSessionState(findSessionStateExtraData(state.Extra), state.EarlyData)
+	if state.EarlyData {
+		state.EarlyData = allow
+	}
+	ncs, err := tls.NewResumptionState(ticket, state)
+	if err != nil {
+		return nil, false
+	}
+	return ncs, true
 }

@@ -77,9 +77,17 @@ type ClientConn struct {
 	logger  *slog.Logger
 
 	requestWriter *requestWriter
+
+	controlSent chan struct{} // [VPP] closed when the control stream's first write is done (or failed)
 }
 
 var _ http.RoundTripper = &ClientConn{}
+
+// ControlSent returns a channel that is closed once the control stream was
+// opened and its SETTINGS (plus Transport.ControlStreamExtra) were written, or
+// that failed. A caller that wants the control stream on the wire before its
+// first request, as a browser has it, waits for it. [VPP]
+func (c *ClientConn) ControlSent() <-chan struct{} { return c.controlSent }
 
 func newClientConn(
 	conn *quic.Conn,
@@ -88,6 +96,7 @@ func newClientConn(
 	maxResponseHeaderBytes int,
 	disableCompression bool,
 	logger *slog.Logger,
+	controlExtra ...byte, // [VPP] Transport.ControlStreamExtra
 ) *ClientConn {
 	var qlogger qlogwriter.Recorder
 	if qlogTrace := conn.QlogTrace(); qlogTrace != nil && qlogTrace.SupportsSchemas(qlog.EventSchema) {
@@ -102,6 +111,7 @@ func newClientConn(
 		logger:             logger,
 		qlogger:            qlogger,
 		decoder:            qpack.NewDecoder(),
+		controlSent:        make(chan struct{}),
 	}
 	if maxResponseHeaderBytes <= 0 {
 		c.maxResponseHeaderBytes = defaultMaxResponseHeaderBytes
@@ -123,7 +133,8 @@ func newClientConn(
 			Datagram:            enableDatagrams,
 			Other:               additionalSettings,
 			MaxFieldSectionSize: int64(c.maxResponseHeaderBytes),
-		})
+		}, controlExtra...)
+		close(c.controlSent)
 		if err != nil {
 			if c.logger != nil {
 				c.logger.Debug("setting up connection failed", "error", err)
