@@ -28,6 +28,15 @@ type InitialPacketSpec struct {
 	// DestConnIDLength specifies how many bytes should the DestConnID be
 	DestConnIDLength int
 
+	// [VPP] DestConnID, when set, is called once per connection and returns
+	// the destination connection id of the client's Initial packets (8..20
+	// bytes) instead of random bytes of DestConnIDLength. On the wire it is
+	// what it always is: bytes the client chose. A caller that wants a
+	// server-side filter to recognise its Initial packets one by one (the
+	// Initial keys are derived from this id, and every datagram of the flight
+	// carries it in the clear) puts a keyed value here.
+	DestConnID func() []byte
+
 	// InitPacketNumberLength specifies how many bytes should the InitPacketNumber
 	// be interpreted as. It is usually 1 or 2 bytes. If unset, UQUIC will use the
 	// default algorithm to compute the length which is at least 2 bytes.

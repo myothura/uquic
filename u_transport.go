@@ -111,7 +111,14 @@ func (t *UTransport) doDial(
 	// Without this, InitialPacketSpec.DestConnIDLength was silently ignored and
 	// the initial DCID got a random length, making the fingerprint unstable.
 	var destConnID protocol.ConnectionID
-	if t.QUICSpec != nil && t.QUICSpec.InitialPacketSpec.DestConnIDLength > 0 {
+	if t.QUICSpec != nil && t.QUICSpec.InitialPacketSpec.DestConnID != nil {
+		// [VPP] the caller chooses the bytes (see InitialPacketSpec.DestConnID)
+		id := t.QUICSpec.InitialPacketSpec.DestConnID()
+		if len(id) < protocol.MinConnectionIDLenInitial || len(id) > protocol.MaxConnIDLen {
+			return nil, errors.New("quic: InitialPacketSpec.DestConnID must return 8..20 bytes")
+		}
+		destConnID = protocol.ParseConnectionID(id)
+	} else if t.QUICSpec != nil && t.QUICSpec.InitialPacketSpec.DestConnIDLength > 0 {
 		destConnID, err = generateConnectionIDForInitialWithLength(t.QUICSpec.InitialPacketSpec.DestConnIDLength)
 	} else {
 		destConnID, err = generateConnectionIDForInitial()
