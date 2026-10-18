@@ -121,6 +121,7 @@ func populateConfig(config *Config) *Config {
 		TokenStore:                       config.TokenStore,
 		EnableDatagrams:                  config.EnableDatagrams,
 		AckInBatch:                       config.AckInBatch,
+		DatagramFill:                     config.DatagramFill, // [VPP] T2Q_DGRAM_FILL_V1
 		InitialPacketSize:                initialPacketSize,
 		DisablePathMTUDiscovery:          config.DisablePathMTUDiscovery,
 		EnableStreamResetPartialDelivery: config.EnableStreamResetPartialDelivery,

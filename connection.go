@@ -371,6 +371,9 @@ var newConnection = func(
 	)
 	s.cryptoStreamHandler = cs
 	s.packer = newPacketPacker(srcConnID, s.connIDManager.Get, s.initialStream, s.handshakeStream, s.sentPacketHandler, s.retransmissionQueue, cs, s.framer, &s.receivedPacketHandler, s.datagramQueue, s.perspective)
+	if pp, ok := s.packer.(*packetPacker); ok {
+		pp.dgramFill = protocol.ByteCount(s.config.DatagramFill) // [VPP] T2Q_DGRAM_FILL_V1
+	}
 	s.unpacker = newPacketUnpacker(cs, s.srcConnIDLen)
 	s.cryptoStreamManager = newCryptoStreamManager(s.initialStream, s.handshakeStream, s.oneRTTStream)
 	return &wrappedConn{Conn: s}
@@ -497,6 +500,9 @@ var newClientConnection = func(
 	s.cryptoStreamManager = newCryptoStreamManager(s.initialStream, s.handshakeStream, oneRTTStream)
 	s.unpacker = newPacketUnpacker(cs, s.srcConnIDLen)
 	s.packer = newPacketPacker(srcConnID, s.connIDManager.Get, s.initialStream, s.handshakeStream, s.sentPacketHandler, s.retransmissionQueue, cs, s.framer, &s.receivedPacketHandler, s.datagramQueue, s.perspective)
+	if pp, ok := s.packer.(*packetPacker); ok {
+		pp.dgramFill = protocol.ByteCount(s.config.DatagramFill) // [VPP] T2Q_DGRAM_FILL_V1
+	}
 	if len(tlsConf.ServerName) > 0 {
 		s.tokenStoreKey = tlsConf.ServerName
 	} else {

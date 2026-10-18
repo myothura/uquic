@@ -198,6 +198,12 @@ type Config struct {
 	// packets): on a download the peer sees one ACK for 7 packets where a
 	// browser sends one for 2.
 	AckInBatch bool
+	// [VPP] T2Q_DGRAM_FILL_V1: a 1-RTT packet that carries a DATAGRAM frame and
+	// is at most this many bytes short of the packet size is padded to it
+	// (0 = never). VPP sizes its datagrams for the longest connection id and
+	// packet number, so with real ones a full datagram packet ended 7 to 22
+	// bytes short of the size every other full packet has.
+	DatagramFill uint8
 	// Enable QUIC Stream Resets with Partial Delivery.
 	// See https://datatracker.ietf.org/doc/html/draft-ietf-quic-reliable-stream-reset-07.
 	EnableStreamResetPartialDelivery bool

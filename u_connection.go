@@ -187,10 +187,9 @@ var newUClientConnection = func(
 	s.cryptoStreamHandler = cs
 	s.cryptoStreamManager = newCryptoStreamManager(s.initialStream, s.handshakeStream, oneRTTStream)
 	s.unpacker = newPacketUnpacker(cs, s.srcConnIDLen)
-	s.packer = newUPacketPacker(
-		newPacketPacker(srcConnID, s.connIDManager.Get, s.initialStream, s.handshakeStream, s.sentPacketHandler, s.retransmissionQueue, cs, s.framer, &s.receivedPacketHandler, s.datagramQueue, s.perspective),
-		uSpec,
-	)
+	up := newPacketPacker(srcConnID, s.connIDManager.Get, s.initialStream, s.handshakeStream, s.sentPacketHandler, s.retransmissionQueue, cs, s.framer, &s.receivedPacketHandler, s.datagramQueue, s.perspective)
+	up.dgramFill = protocol.ByteCount(s.config.DatagramFill) // [VPP] T2Q_DGRAM_FILL_V1: the uquic client's packer is built here
+	s.packer = newUPacketPacker(up, uSpec)
 	if len(tlsConf.ServerName) > 0 {
 		s.tokenStoreKey = tlsConf.ServerName
 	} else {

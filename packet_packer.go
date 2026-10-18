@@ -135,6 +135,8 @@ type packetPacker struct {
 	rand                rand.Rand
 
 	numNonAckElicitingAcks int
+
+	dgramFill protocol.ByteCount // [VPP] T2Q_DGRAM_FILL_V1 (Config.DatagramFill)
 }
 
 var _ packer = &packetPacker{}
@@ -490,7 +492,21 @@ func (p *packetPacker) appendPacket(
 	}
 	kp := sealer.KeyPhase()
 
-	return p.appendShortHeaderPacket(buf, connID, pn, pnLen, kp, pl, 0, maxPacketSize, sealer, false, v)
+	// [VPP] T2Q_DGRAM_FILL_V1: a packet carrying a DATAGRAM frame that is a few
+	// bytes short of the packet size is padded to it; a smaller one (the end of
+	// a burst, a game's datagram) is left as it is.
+	var fill protocol.ByteCount
+	if p.dgramFill > 0 && !onlyAck {
+		for _, f := range pl.frames {
+			if _, ok := f.Frame.(*wire.DatagramFrame); ok {
+				if room := maxPacketSize - hdrLen - protocol.ByteCount(sealer.Overhead()) - pl.length; room > 0 && room <= p.dgramFill {
+					fill = room
+				}
+				break
+			}
+		}
+	}
+	return p.appendShortHeaderPacket(buf, connID, pn, pnLen, kp, pl, fill, maxPacketSize, sealer, false, v)
 }
 
 func (p *packetPacker) maybeGetCryptoPacket(

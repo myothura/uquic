@@ -120,6 +120,8 @@ func configWithNonZeroNonFunctionFields(t *testing.T) *Config {
 			f.Set(reflect.ValueOf(true))
 		case "AckInBatch": // [VPP]
 			f.Set(reflect.ValueOf(true))
+		case "DatagramFill": // [VPP] T2Q_DGRAM_FILL_V1
+			f.Set(reflect.ValueOf(uint8(32)))
 		case "DisableVersionNegotiationPackets":
 			f.Set(reflect.ValueOf(true))
 		case "InitialPacketSize":
