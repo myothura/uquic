@@ -178,3 +178,49 @@ func TestDatagramQueueClose(t *testing.T) {
 		}
 	})
 }
+
+// [VPP] VPP_DGRAM_URGENT_V1: an urgent datagram is sent before those queued
+// with Add, urgent ones keep their order, Pop takes the frame Peek gave even
+// when an urgent one arrived between the two, and AddUrgent blocks at
+// maxDatagramUrgentLen until one of its own is popped.
+func TestDatagramQueueUrgent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+		require.NoError(t, queue.Add(&wire.DatagramFrame{Data: []byte("bulk1")}))
+		require.NoError(t, queue.Add(&wire.DatagramFrame{Data: []byte("bulk2")}))
+		require.NoError(t, queue.AddUrgent(&wire.DatagramFrame{Data: []byte("call1")}))
+		require.NoError(t, queue.AddUrgent(&wire.DatagramFrame{Data: []byte("call2")}))
+		for _, want := range []string{"call1", "call2", "bulk1"} {
+			require.Equal(t, want, string(queue.Peek().Data))
+			queue.Pop()
+		}
+		// Peek gave bulk2; an urgent frame arrives before Pop: bulk2 is the one popped
+		require.Equal(t, "bulk2", string(queue.Peek().Data))
+		require.NoError(t, queue.AddUrgent(&wire.DatagramFrame{Data: []byte("call3")}))
+		queue.Pop()
+		require.Equal(t, "call3", string(queue.Peek().Data))
+		queue.Pop()
+		require.Nil(t, queue.Peek())
+
+		for range maxDatagramUrgentLen {
+			require.NoError(t, queue.AddUrgent(&wire.DatagramFrame{Data: []byte{0}}))
+		}
+		errChan := make(chan error, 1)
+		go func() { errChan <- queue.AddUrgent(&wire.DatagramFrame{Data: []byte("late")}) }()
+		synctest.Wait()
+		select {
+		case <-errChan:
+			t.Fatal("AddUrgent did not block on a full urgent queue")
+		default:
+		}
+		require.NotNil(t, queue.Peek())
+		queue.Pop()
+		synctest.Wait()
+		select {
+		case err := <-errChan:
+			require.NoError(t, err)
+		default:
+			t.Fatal("AddUrgent stayed blocked after an urgent datagram was popped")
+		}
+	})
+}

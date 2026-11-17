@@ -3036,7 +3036,15 @@ func (c *Conn) onStreamCompleted(id protocol.StreamID) {
 // The payload of the datagram needs to fit into a single QUIC packet.
 // In addition, a datagram may be dropped before being sent out if the available packet size suddenly decreases.
 // If the payload is too large to be sent at the current time, a DatagramTooLargeError is returned.
-func (c *Conn) SendDatagram(p []byte) error {
+func (c *Conn) SendDatagram(p []byte) error { return c.sendDatagram(p, false) }
+
+// SendDatagramUrgent ([VPP] VPP_DGRAM_URGENT_V1) is SendDatagram for a
+// datagram that must not wait behind those already queued (a call's packet
+// beside an upload's): it is sent before them, after the urgent ones before
+// it.
+func (c *Conn) SendDatagramUrgent(p []byte) error { return c.sendDatagram(p, true) }
+
+func (c *Conn) sendDatagram(p []byte, urgent bool) error {
 	if !c.supportsDatagrams() {
 		return errors.New("datagram support disabled")
 	}
@@ -3053,6 +3061,9 @@ func (c *Conn) SendDatagram(p []byte) error {
 	}
 	f.Data = make([]byte, len(p))
 	copy(f.Data, p)
+	if urgent {
+		return c.datagramQueue.AddUrgent(f)
+	}
 	return c.datagramQueue.Add(f)
 }
 
