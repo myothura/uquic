@@ -13,9 +13,16 @@ const (
 	// [VPP] VPP_DGRAM_QUEUE_V1: it was 32. A caller that orders its own
 	// datagrams (VPP's FQ-CoDel: a call's packet ahead of an upload's) had
 	// that order undone here: up to 32 full datagrams in front of the one it
-	// had just let pass (38 KB: 300 ms on a 1 Mbit/s uplink). With 2, Add
-	// blocks at once and what waits, waits in the caller's queue.
-	maxDatagramSendQueueLen = 2
+	// had just let pass (38 KB: 300 ms on a 1 Mbit/s uplink).
+	// VPP_DGRAM_QUEUE_V2: 8, not 2. The packet that must not wait has its
+	// own way now (AddUrgent), so this queue only holds what may wait, and at
+	// 2 an upload was slower: every Add waited a packet time for room, the
+	// caller took that for a carrier that is behind and sent the upload
+	// without parity (lab, 3 Mbit/s up, an upload beside a call: 47 % of the
+	// line at 2, 56-60 % at 8, 58 % at 16, 62 % at 32; the call the same at
+	// each). 8 full datagrams are 27 ms of that line: what a video call's
+	// frame, which is not sent the urgent way, may wait here at most.
+	maxDatagramSendQueueLen = 8
 	// [VPP] VPP_DGRAM_URGENT_V1: datagrams that go ahead of the queue
 	// (AddUrgent) wait in a queue of their own of this length; AddUrgent
 	// blocks when it is full
